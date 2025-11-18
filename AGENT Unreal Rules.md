@@ -70,6 +70,30 @@ These rules guide refactoring efforts to keep controllers thin, maintainable, an
 * Controllers forward native events to Blueprint delegates (`DECLARE_DYNAMIC_MULTICAST_DELEGATE`).
 * This keeps UI/Blueprint coupling minimal while allowing services to emit events freely.
 
+### Delegate Declaration Syntax
+
+**Correct syntax for Blueprint-exposed delegates:**
+
+1. **Declare the delegate type** using `DECLARE_DYNAMIC_MULTICAST_DELEGATE` or `DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam` (etc.) **before** the class definition or in the public section:
+   ```cpp
+   DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTransformUpdatedDelegate, const FVRPNTransformData&, Transform);
+   DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnConnectionEstablishedDelegate);
+   ```
+
+2. **Declare the delegate instance** as a member variable with `UPROPERTY(BlueprintAssignable)`:
+   ```cpp
+   UPROPERTY(BlueprintAssignable, Category = "VRPN")
+   FOnTransformUpdatedDelegate OnTransformUpdated;
+   
+   UPROPERTY(BlueprintAssignable, Category = "VRPN")
+   FOnConnectionEstablishedDelegate OnConnectionEstablished;
+   ```
+
+**Common mistakes to avoid:**
+* ❌ **DO NOT** place `DECLARE_DYNAMIC_MULTICAST_DELEGATE` inside the class definition - it must be declared before the class or in the public section.
+* ❌ **DO NOT** try to use `ToolTip` specifier in `UFUNCTION` - it's not supported. Use `meta = (ToolTip = "...")` in `UPROPERTY` instead.
+* ✅ The delegate type declaration and the member variable declaration are **separate** - declare the type first, then declare the instance.
+
 ---
 
 ## Factory Patterns
@@ -222,6 +246,18 @@ When building transport layers for API data streams (media: image/video/audio, m
 * Use `FMemory::Memcpy` for low-level memory operations when working with native data streams.
 * Leverage Unreal's `USTRUCT` system with `UPROPERTY` for serialization when you need reflection, but prefer manual binary serialization for hot paths.
 
+### Socket Creation with MakeShareable
+
+* **Always use `MakeShareable()` when creating sockets** returned from `ISocketSubsystem::CreateSocket()`.
+* `CreateSocket()` returns a raw `FSocket*` pointer, but Unreal's socket management typically uses `TSharedPtr<FSocket>`.
+* ❌ **WRONG:** `UDPSocket = SocketSubsystem->CreateSocket(...);` - Direct assignment will fail to compile.
+* ✅ **CORRECT:** 
+  ```cpp
+  FSocket* RawSocket = SocketSubsystem->CreateSocket(NAME_DGram, TEXT("VRPN_UDP"), ...);
+  UDPSocket = MakeShareable(RawSocket);
+  ```
+* This ensures proper reference counting and automatic cleanup when the shared pointer goes out of scope.
+
 ---
 
 ## AI Model Integration with NIM Containers
@@ -339,6 +375,23 @@ List all such instances in summaries of your work in chat when you're done. This
 
 ---
 
+## UFUNCTION and UPROPERTY Specifiers
+
+### CallInEditor Warning
+
+* **CRITICAL: `CallInEditor` specifier does NOT accept a value.**
+* ❌ **WRONG:** `UFUNCTION(BlueprintCallable, CallInEditor = true)` - This will cause a compilation error.
+* ✅ **CORRECT:** `UFUNCTION(BlueprintCallable, CallInEditor)` - No assignment, just the specifier name.
+* The `CallInEditor` specifier is a boolean flag - its presence enables the feature, absence disables it. Unreal's reflection system does not support assigning values to this specifier.
+
+### ToolTip in UPROPERTY
+
+* **ToolTip is only supported in `UPROPERTY`, not in `UFUNCTION`.**
+* ❌ **WRONG:** `UFUNCTION(BlueprintCallable, ToolTip = "...")` - This will cause a compilation error.
+* ✅ **CORRECT:** `UPROPERTY(EditAnywhere, meta = (ToolTip = "..."))` - Use `meta = (ToolTip = "...")` syntax.
+
+---
+
 ## Unreal Golden Rules
 
 * Always null-check pointers: `if (Actor) ...`
@@ -347,6 +400,16 @@ List all such instances in summaries of your work in chat when you're done. This
 * `TArray::Add(MoveTemp(...))` = zero-cost insert.
 * `const T&` = zero-cost read-only access.
 * `TWeakObjectPtr` = the only safe way to reference UObjects in async or long-lived contexts.
+
+---
+
+## Plugin File Structure
+
+* **CRITICAL: All plugin files must be saved within `Plugins/[Project-Name]/` folder.**
+* **NEVER save files outside the plugin directory** (e.g., in `Source/`, project root, or other locations).
+* The plugin must be self-contained within `Plugins/[Project-Name]/` - this includes all source files, headers, resources, and configuration.
+* **Exception:** Only when explicitly testing a different repository structure (e.g., using the plugin as a submodule in another project) may files be placed elsewhere, and this is a rare exception that should be clearly documented.
+* If you find yourself needing to place files outside the plugin directory, this is a strong signal that the plugin structure needs review - plugins should be fully self-contained.
 
 ---
 
